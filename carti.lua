@@ -6301,10 +6301,112 @@ end
 
 _G.CartiHubAvatarPersistenceState = avatarPersistenceState
 
+-- Template models live in workspace.CartiAvatars so Potassium can keep them
+-- across re-executes. Delete a child there to forget a saved avatar.
+local function getAvatarCacheFolder()
+    local folder = workspace:FindFirstChild("CartiAvatars")
+    if folder and folder:IsA("Folder") then
+        return folder
+    end
+    if folder then
+        folder:Destroy()
+    end
+    folder = Instance.new("Folder")
+    folder.Name = "CartiAvatars"
+    folder:SetAttribute("CartiHubAvatarCache", true)
+    folder.Parent = workspace
+    return folder
+end
+
+local function avatarTemplateName(userId)
+    return "Avatar_" .. tostring(userId)
+end
+
+local function findCachedAvatar(userId)
+    local folder = workspace:FindFirstChild("CartiAvatars")
+    if not folder then
+        return nil
+    end
+    local template = folder:FindFirstChild(avatarTemplateName(userId))
+    if template and template:IsA("Model") then
+        return template
+    end
+    for _, child in ipairs(folder:GetChildren()) do
+        if child:IsA("Model") and tonumber(child:GetAttribute("UserId")) == tonumber(userId) then
+            return child
+        end
+    end
+    return nil
+end
+
+local function listCachedAvatars()
+    local folder = workspace:FindFirstChild("CartiAvatars")
+    local list = {}
+    if not folder then
+        return list
+    end
+    for _, child in ipairs(folder:GetChildren()) do
+        if child:IsA("Model") then
+            local userId = tonumber(child:GetAttribute("UserId"))
+                or tonumber(tostring(child.Name):match("Avatar_(%d+)"))
+            if userId then
+                table.insert(list, {
+                    UserId = userId,
+                    Name = tostring(child:GetAttribute("DisplayName") or child:GetAttribute("Username") or child.Name),
+                    Template = child,
+                })
+            end
+        end
+    end
+    table.sort(list, function(a, b)
+        return tostring(a.Name):lower() < tostring(b.Name):lower()
+    end)
+    return list
+end
+
+local function sanitizeAvatarTemplate(model)
+    for _, item in ipairs(model:GetDescendants()) do
+        if item:IsA("LuaSourceContainer") or item:IsA("Tool") or item:IsA("Script") or item:IsA("LocalScript") then
+            item:Destroy()
+        elseif item:IsA("BasePart") then
+            item.Anchored = true
+            item.CanCollide = false
+            item.CanTouch = false
+            item.CanQuery = false
+            item.AssemblyLinearVelocity = Vector3.zero
+            item.AssemblyAngularVelocity = Vector3.zero
+        end
+    end
+    model.Archivable = true
+end
+
+local function saveAvatarTemplate(userId, displayName, sourceModel)
+    if not sourceModel or not userId then
+        return nil
+    end
+    local folder = getAvatarCacheFolder()
+    local name = avatarTemplateName(userId)
+    local existing = folder:FindFirstChild(name)
+    if existing then
+        existing:Destroy()
+    end
+
+    local template = sourceModel:Clone()
+    template.Name = name
+    template:SetAttribute("UserId", userId)
+    template:SetAttribute("DisplayName", tostring(displayName or userId))
+    template:SetAttribute("Username", tostring(displayName or userId))
+    template:SetAttribute("CartiHubAvatarTemplate", true)
+    template:SetAttribute("SavedAt", os.time())
+    sanitizeAvatarTemplate(template)
+    template.Parent = folder
+    return template
+end
+
 local AvatarChangerFrame = Instance.new("Frame")
 AvatarChangerFrame.Name = "AvatarChangerGUI"
-AvatarChangerFrame.Size = UDim2.new(0, 280, 0, 190)
-AvatarChangerFrame.Position = UDim2.new(0.5, -140, 0.5, -95)
+AvatarChangerFrame.Size = UDim2.new(0, 320, 0, 420)
+AvatarChangerFrame.Position = UDim2.new(0.5, -160, 0.5, -210)
 AvatarChangerFrame.BackgroundColor3 = Color3.fromRGB(9, 14, 31)
 AvatarChangerFrame.BorderSizePixel = 0
 AvatarChangerFrame.Active = true
@@ -6341,8 +6443,8 @@ AvatarChangerCloseBtn.TextSize = 18
 AvatarChangerCloseBtn.Parent = AvatarChangerFrame
 
 local AvatarUserIdBox = Instance.new("TextBox")
-AvatarUserIdBox.Size = UDim2.new(1, -28, 0, 38)
-AvatarUserIdBox.Position = UDim2.new(0, 14, 0, 52)
+AvatarUserIdBox.Size = UDim2.new(1, -28, 0, 34)
+AvatarUserIdBox.Position = UDim2.new(0, 14, 0, 46)
 AvatarUserIdBox.BackgroundColor3 = Color3.fromRGB(15, 25, 52)
 AvatarUserIdBox.PlaceholderText = "Username or User ID"
 AvatarUserIdBox.PlaceholderColor3 = Color3.fromRGB(120, 151, 191)
@@ -6355,37 +6457,104 @@ AvatarUserIdBox.Parent = AvatarChangerFrame
 Instance.new("UICorner", AvatarUserIdBox).CornerRadius = UDim.new(0, 8)
 
 local AvatarChangeBtn = Instance.new("TextButton")
-AvatarChangeBtn.Size = UDim2.new(1, -28, 0, 38)
-AvatarChangeBtn.Position = UDim2.new(0, 14, 0, 102)
+AvatarChangeBtn.Size = UDim2.new(0.48, -10, 0, 32)
+AvatarChangeBtn.Position = UDim2.new(0, 14, 0, 88)
 AvatarChangeBtn.BackgroundColor3 = BUTTON_COLOR
-AvatarChangeBtn.Text = "CHANGE AVATAR"
+AvatarChangeBtn.Text = "CHANGE"
 AvatarChangeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 AvatarChangeBtn.Font = Enum.Font.GothamBold
-AvatarChangeBtn.TextSize = 13
+AvatarChangeBtn.TextSize = 12
 AvatarChangeBtn.Parent = AvatarChangerFrame
 Instance.new("UICorner", AvatarChangeBtn).CornerRadius = UDim.new(0, 8)
 
 local AvatarResetBtn = Instance.new("TextButton")
-AvatarResetBtn.Size = UDim2.new(1, -28, 0, 34)
-AvatarResetBtn.Position = UDim2.new(0, 14, 0, 146)
+AvatarResetBtn.Size = UDim2.new(0.48, -10, 0, 32)
+AvatarResetBtn.Position = UDim2.new(0.52, -4, 0, 88)
 AvatarResetBtn.BackgroundColor3 = Color3.fromRGB(110, 70, 210)
-AvatarResetBtn.Text = "RESET AVATAR"
+AvatarResetBtn.Text = "RESET"
 AvatarResetBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 AvatarResetBtn.Font = Enum.Font.GothamBold
-AvatarResetBtn.TextSize = 13
+AvatarResetBtn.TextSize = 12
 AvatarResetBtn.Parent = AvatarChangerFrame
 Instance.new("UICorner", AvatarResetBtn).CornerRadius = UDim.new(0, 8)
+
+local AvatarStatusLabel = Instance.new("TextLabel")
+AvatarStatusLabel.Size = UDim2.new(1, -28, 0, 18)
+AvatarStatusLabel.Position = UDim2.new(0, 14, 0, 124)
+AvatarStatusLabel.BackgroundTransparency = 1
+AvatarStatusLabel.Text = "Saved templates → workspace.CartiAvatars"
+AvatarStatusLabel.TextColor3 = Color3.fromRGB(160, 190, 220)
+AvatarStatusLabel.Font = Enum.Font.Gotham
+AvatarStatusLabel.TextSize = 11
+AvatarStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+AvatarStatusLabel.TextTruncate = Enum.TextTruncate.AtEnd
+AvatarStatusLabel.Parent = AvatarChangerFrame
+
+local SavedListTitle = Instance.new("TextLabel")
+SavedListTitle.Size = UDim2.new(1, -100, 0, 22)
+SavedListTitle.Position = UDim2.new(0, 14, 0, 146)
+SavedListTitle.BackgroundTransparency = 1
+SavedListTitle.Text = "Saved Avatars"
+SavedListTitle.TextColor3 = Color3.fromRGB(210, 245, 255)
+SavedListTitle.Font = Enum.Font.GothamBold
+SavedListTitle.TextSize = 13
+SavedListTitle.TextXAlignment = Enum.TextXAlignment.Left
+SavedListTitle.Parent = AvatarChangerFrame
+
+local AvatarRefreshListBtn = Instance.new("TextButton")
+AvatarRefreshListBtn.Size = UDim2.new(0, 72, 0, 22)
+AvatarRefreshListBtn.Position = UDim2.new(1, -86, 0, 146)
+AvatarRefreshListBtn.BackgroundColor3 = BUTTON_COLOR
+AvatarRefreshListBtn.Text = "REFRESH"
+AvatarRefreshListBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+AvatarRefreshListBtn.Font = Enum.Font.GothamBold
+AvatarRefreshListBtn.TextSize = 10
+AvatarRefreshListBtn.Parent = AvatarChangerFrame
+Instance.new("UICorner", AvatarRefreshListBtn).CornerRadius = UDim.new(0, 6)
+
+local AvatarSavedScroll = Instance.new("ScrollingFrame")
+AvatarSavedScroll.Size = UDim2.new(1, -28, 1, -182)
+AvatarSavedScroll.Position = UDim2.new(0, 14, 0, 172)
+AvatarSavedScroll.BackgroundColor3 = Color3.fromRGB(12, 20, 42)
+AvatarSavedScroll.BorderSizePixel = 0
+AvatarSavedScroll.ScrollBarThickness = 4
+AvatarSavedScroll.ScrollBarImageColor3 = Color3.fromRGB(83, 220, 255)
+AvatarSavedScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+AvatarSavedScroll.Parent = AvatarChangerFrame
+Instance.new("UICorner", AvatarSavedScroll).CornerRadius = UDim.new(0, 8)
+
+local AvatarSavedLayout = Instance.new("UIListLayout")
+AvatarSavedLayout.SortOrder = Enum.SortOrder.LayoutOrder
+AvatarSavedLayout.Padding = UDim.new(0, 6)
+AvatarSavedLayout.Parent = AvatarSavedScroll
+
+local AvatarSavedPadding = Instance.new("UIPadding")
+AvatarSavedPadding.PaddingTop = UDim.new(0, 6)
+AvatarSavedPadding.PaddingBottom = UDim.new(0, 6)
+AvatarSavedPadding.PaddingLeft = UDim.new(0, 6)
+AvatarSavedPadding.PaddingRight = UDim.new(0, 6)
+AvatarSavedPadding.Parent = AvatarSavedScroll
+
+Runtime.connect(AvatarSavedLayout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
+    AvatarSavedScroll.CanvasSize = UDim2.new(0, 0, 0, AvatarSavedLayout.AbsoluteContentSize.Y + 14)
+end)
+
+local function setAvatarStatus(text)
+    AvatarStatusLabel.Text = tostring(text or "")
+end
 
 local function setAvatarButtonText(button, text)
     button.Text = text
     task.delay(2, function()
         if button == AvatarChangeBtn then
-            button.Text = "CHANGE AVATAR"
+            button.Text = "CHANGE"
         elseif button == AvatarResetBtn then
-            button.Text = "RESET AVATAR"
+            button.Text = "RESET"
         end
     end)
 end
+
+local refreshSavedAvatarList
 
 local function resolveAvatarUserId(input)
     input = tostring(input or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -6418,6 +6587,84 @@ local function resolveAvatarUserId(input)
     end
 
     return resolvedUserId
+end
+
+-- ===================== CUSTOM ANIMATION IDS (Grok / Carti combined) =====================
+local DESIRED_ANIMS = {
+    idle = {
+        "http://www.roblox.com/asset/?id=10921301576",
+        "http://www.roblox.com/asset/?id=10921302207",
+    },
+    walk = { "http://www.roblox.com/asset/?id=10921269718" },
+    run = { "http://www.roblox.com/asset/?id=616163682" },
+    jump = { "http://www.roblox.com/asset/?id=10921160088" },
+    fall = { "http://www.roblox.com/asset/?id=507767968" },
+    climb = { "http://www.roblox.com/asset/?id=10921053544" },
+    swim = { "http://www.roblox.com/asset/?id=10921243048" },
+    swimidle = { "http://www.roblox.com/asset/?id=10921244018" },
+    sit = { "http://www.roblox.com/asset/?id=2506281703" },
+    toolnone = { "http://www.roblox.com/asset/?id=507768375" },
+    toolslash = { "http://www.roblox.com/asset/?id=522635514" },
+    toollunge = { "http://www.roblox.com/asset/?id=522638767" },
+    wave = { "http://www.roblox.com/asset/?id=507770239" },
+    point = { "http://www.roblox.com/asset/?id=507770453" },
+    dance = {
+        "http://www.roblox.com/asset/?id=507771019",
+        "http://www.roblox.com/asset/?id=507771055",
+        "http://www.roblox.com/asset/?id=507772104",
+    },
+    dance2 = {
+        "http://www.roblox.com/asset/?id=507776043",
+        "http://www.roblox.com/asset/?id=507776770",
+        "http://www.roblox.com/asset/?id=507776879",
+    },
+    dance3 = {
+        "http://www.roblox.com/asset/?id=507777268",
+        "http://www.roblox.com/asset/?id=507777451",
+        "http://www.roblox.com/asset/?id=507777623",
+    },
+    laugh = { "http://www.roblox.com/asset/?id=507770818" },
+    cheer = { "http://www.roblox.com/asset/?id=507770677" },
+    mood = { "http://www.roblox.com/asset/?id=14366558676" },
+    pose = { "http://www.roblox.com/asset/?id=10921303913" },
+}
+
+local function forceAnimations(character)
+    if not character or not character.Parent then
+        return
+    end
+
+    local animate = character:WaitForChild("Animate", 8)
+    if not animate then
+        return
+    end
+
+    task.wait(0.35) -- let the game finish setting up the children
+
+    for folderName, idList in pairs(DESIRED_ANIMS) do
+        local folder = animate:FindFirstChild(folderName)
+        if not folder then
+            continue
+        end
+
+        local anims = {}
+        for _, child in ipairs(folder:GetChildren()) do
+            if child:IsA("Animation") then
+                table.insert(anims, child)
+            end
+        end
+
+        table.sort(anims, function(a, b)
+            return a.Name < b.Name
+        end)
+
+        for i, anim in ipairs(anims) do
+            local newId = idList[i] or idList[1]
+            if newId and anim.AnimationId ~= newId then
+                anim.AnimationId = newId
+            end
+        end
+    end
 end
 
 local function clearLocalAvatarAppearance(character)
@@ -6635,19 +6882,54 @@ local function copyAvatarModelAppearance(sourceModel, character)
     return true
 end
 
-local function applyAvatarByGeneratedModel(userId, character)
+local function resolveDisplayName(userId, preferred)
+    preferred = tostring(preferred or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if preferred ~= "" and not tonumber(preferred) then
+        return preferred
+    end
+    local ok, name = pcall(function()
+        return Players:GetNameFromUserIdAsync(userId)
+    end)
+    if ok and type(name) == "string" and name ~= "" then
+        return name
+    end
+    return tostring(userId)
+end
+
+-- Prefer a local template in workspace.CartiAvatars. Only hit Roblox when missing.
+local function getOrFetchAvatarModel(userId, displayName)
+    local cached = findCachedAvatar(userId)
+    if cached then
+        local clone = cached:Clone()
+        clone.Parent = nil
+        return clone, true
+    end
+
     local ok, sourceModel = pcall(function()
         return Players:CreateHumanoidModelFromUserId(userId)
     end)
-
     if not ok or not sourceModel then
-        return false, "MODEL FETCH FAILED"
+        return nil, false, "MODEL FETCH FAILED"
     end
 
     sourceModel.Parent = nil
+    local label = resolveDisplayName(userId, displayName)
+    saveAvatarTemplate(userId, label, sourceModel)
+    if refreshSavedAvatarList then
+        task.defer(refreshSavedAvatarList)
+    end
+    return sourceModel, false
+end
+
+local function applyAvatarByGeneratedModel(userId, character, displayName)
+    local sourceModel, fromCache, fetchErr = getOrFetchAvatarModel(userId, displayName)
+    if not sourceModel then
+        return false, fetchErr or "MODEL FETCH FAILED"
+    end
+
     if not Runtime.Active or character ~= localPlayer.Character then
         sourceModel:Destroy()
-        return false, 'CHARACTER CHANGED'
+        return false, "CHARACTER CHANGED"
     end
 
     local copyOk, copyErr = pcall(function()
@@ -6661,14 +6943,18 @@ local function applyAvatarByGeneratedModel(userId, character)
         return false, "COPY FAILED"
     end
 
-    return true
+    return true, fromCache and "CACHED" or "DOWNLOADED"
 end
 
 applyAvatarFromUserId = function(userIdOrName)
-    if not Runtime.Active then return false, 'HUB CLOSED' end
-    if localPlayer.Character and Runtime.AvatarWeapons:IsChanging(localPlayer.Character) then return false, 'AVATAR CHANGE IN PROGRESS' end
+    if not Runtime.Active then return false, "HUB CLOSED" end
+    if localPlayer.Character and Runtime.AvatarWeapons:IsChanging(localPlayer.Character) then
+        return false, "AVATAR CHANGE IN PROGRESS"
+    end
     Runtime.AvatarRequestGeneration = (Runtime.AvatarRequestGeneration or 0) + 1
     local generation = Runtime.AvatarRequestGeneration
+
+    local preferredName = tostring(userIdOrName or "")
     local userId, resolveError = resolveAvatarUserId(userIdOrName)
     if not userId then
         return false, resolveError or "INVALID USER"
@@ -6679,46 +6965,157 @@ applyAvatarFromUserId = function(userIdOrName)
     if not humanoid then
         return false, "NO HUMANOID"
     end
-
-    local ok, description = pcall(function()
-        return Players:GetHumanoidDescriptionFromUserId(userId)
-    end)
-
-    if not ok or not description then
-        return false, "USER NOT FOUND"
-    end
     if not Runtime.Active or character ~= localPlayer.Character or generation ~= Runtime.AvatarRequestGeneration then
-        description:Destroy()
-        return false, 'AVATAR REQUEST SUPERSEDED'
+        return false, "AVATAR REQUEST SUPERSEDED"
     end
-    local snapshot, captureError = Runtime.AvatarWeapons:Begin(character, localPlayer:FindFirstChild('Backpack'))
-    if not snapshot then description:Destroy(); return false, captureError end
+
+    local snapshot, captureError = Runtime.AvatarWeapons:Begin(character, localPlayer:FindFirstChild("Backpack"))
+    if not snapshot then
+        return false, captureError
+    end
+
     local completed, result, reason = xpcall(function()
-        local applyOk, applyErr = pcall(function() humanoid:ApplyDescriptionReset(description) end)
-        if not applyOk and Runtime.AvatarWeapons:IsCurrent(snapshot) then
-            applyOk, applyErr = pcall(function() humanoid:ApplyDescription(description) end)
+        -- Fast path: local template already saved under workspace.CartiAvatars
+        if findCachedAvatar(userId) then
+            local ok, detail = applyAvatarByGeneratedModel(userId, character, preferredName)
+            if not ok then
+                return false, detail
+            end
+            return true, detail or "CACHED"
         end
-        if not Runtime.AvatarWeapons:IsCurrent(snapshot) then return false, 'CHARACTER CHANGED' end
-        if not applyOk then
-            warn('[Carti Hub] HumanoidDescription apply failed, using model copy fallback: ' .. tostring(applyErr))
-            applyBodyDescriptionValues(humanoid, description)
-            return applyAvatarByGeneratedModel(userId, character)
+
+        -- First-time: try official description apply, still cache a template for next time
+        local ok, description = pcall(function()
+            return Players:GetHumanoidDescriptionFromUserId(userId)
+        end)
+
+        if ok and description then
+            local applyOk, applyErr = pcall(function()
+                humanoid:ApplyDescriptionReset(description)
+            end)
+            if not applyOk and Runtime.AvatarWeapons:IsCurrent(snapshot) then
+                applyOk, applyErr = pcall(function()
+                    humanoid:ApplyDescription(description)
+                end)
+            end
+            description:Destroy()
+
+            if not Runtime.AvatarWeapons:IsCurrent(snapshot) then
+                return false, "CHARACTER CHANGED"
+            end
+
+            if applyOk then
+                -- Cache a template in the background so respawns skip the web download
+                task.spawn(function()
+                    local model, err
+                    model, _, err = getOrFetchAvatarModel(userId, preferredName)
+                    if model then
+                        model:Destroy()
+                    elseif err then
+                        warn("[Carti Hub] Could not cache avatar template: " .. tostring(err))
+                    end
+                end)
+                return true, "APPLIED"
+            end
+
+            warn("[Carti Hub] HumanoidDescription apply failed, using model copy: " .. tostring(applyErr))
         end
-        return true
+
+        local copyOk, detail = applyAvatarByGeneratedModel(userId, character, preferredName)
+        if not copyOk then
+            return false, detail
+        end
+        return true, detail or "DOWNLOADED"
     end, debug.traceback)
-    description:Destroy()
+
     local rebound = Runtime.AvatarWeapons:Finish(snapshot)
-    if not completed then warn('[Carti Hub] Avatar change failed: ' .. tostring(result)); return false, 'AVATAR CHANGE FAILED' end
-    if not rebound then return false, 'CHARACTER CHANGED' end
-    if result then avatarPersistenceState.UserId = userId end
+    if not completed then
+        warn("[Carti Hub] Avatar change failed: " .. tostring(result))
+        return false, "AVATAR CHANGE FAILED"
+    end
+    if not rebound then
+        return false, "CHARACTER CHANGED"
+    end
+    if result then
+        avatarPersistenceState.UserId = userId
+        avatarPersistenceState.DisplayName = resolveDisplayName(userId, preferredName)
+        task.spawn(forceAnimations, character)
+        if refreshSavedAvatarList then
+            task.defer(refreshSavedAvatarList)
+        end
+    end
     return result, reason
+end
+
+refreshSavedAvatarList = function()
+    for _, child in ipairs(AvatarSavedScroll:GetChildren()) do
+        if child:IsA("GuiObject") and child ~= AvatarSavedLayout and not child:IsA("UIPadding") then
+            child:Destroy()
+        end
+    end
+
+    local entries = listCachedAvatars()
+    if #entries == 0 then
+        local empty = Instance.new("TextLabel")
+        empty.Size = UDim2.new(1, -4, 0, 36)
+        empty.BackgroundTransparency = 1
+        empty.Text = "No saved avatars yet.\nChange one to cache it here."
+        empty.TextColor3 = Color3.fromRGB(150, 170, 200)
+        empty.Font = Enum.Font.Gotham
+        empty.TextSize = 12
+        empty.TextWrapped = true
+        empty.Parent = AvatarSavedScroll
+        setAvatarStatus("Saved templates → workspace.CartiAvatars")
+        return
+    end
+
+    for index, entry in ipairs(entries) do
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1, -4, 0, 40)
+        row.BackgroundColor3 = Color3.fromRGB(16, 27, 55)
+        row.BorderSizePixel = 0
+        row.LayoutOrder = index
+        row.Parent = AvatarSavedScroll
+        Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+
+        local nameLabel = Instance.new("TextLabel")
+        nameLabel.Size = UDim2.new(1, -78, 1, 0)
+        nameLabel.Position = UDim2.new(0, 10, 0, 0)
+        nameLabel.BackgroundTransparency = 1
+        nameLabel.Text = entry.Name .. "  (" .. tostring(entry.UserId) .. ")"
+        nameLabel.TextColor3 = Color3.fromRGB(220, 240, 255)
+        nameLabel.Font = Enum.Font.Gotham
+        nameLabel.TextSize = 12
+        nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+        nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+        nameLabel.Parent = row
+
+        local useBtn = Instance.new("TextButton")
+        useBtn.Size = UDim2.new(0, 60, 0, 26)
+        useBtn.Position = UDim2.new(1, -68, 0.5, -13)
+        useBtn.BackgroundColor3 = BUTTON_COLOR
+        useBtn.Text = "USE"
+        useBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        useBtn.Font = Enum.Font.GothamBold
+        useBtn.TextSize = 11
+        useBtn.Parent = row
+        Instance.new("UICorner", useBtn).CornerRadius = UDim.new(0, 6)
+
+        Runtime.connect(useBtn.MouseButton1Click, function()
+            AvatarUserIdBox.Text = entry.Name
+            setAvatarStatus("Loading " .. entry.Name .. " (cached)…")
+            local ok, detail = applyAvatarFromUserId(entry.UserId)
+            setAvatarStatus(ok and ("Applied " .. entry.Name .. " [" .. tostring(detail or "CACHED") .. "]")
+                or tostring(detail or "FAILED"))
+            setAvatarButtonText(AvatarChangeBtn, ok and "APPLIED" or tostring(detail or "FAILED"))
+        end)
+    end
+
+    setAvatarStatus(#entries .. " saved template(s) in workspace.CartiAvatars")
 end
 
 avatarPersistenceState.Connection = Runtime.connect(localPlayer.CharacterAdded, function(character)
     local savedUserId = avatarPersistenceState.UserId
-    if not savedUserId then
-        return
-    end
 
     task.spawn(function()
         local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -6727,40 +7124,82 @@ avatarPersistenceState.Connection = Runtime.connect(localPlayer.CharacterAdded, 
             return
         end
 
-        task.wait(0.35)
-        if avatarPersistenceState.UserId == savedUserId and character == localPlayer.Character then
+        -- Shorter settle when a local template exists; still brief for MM2 loadout.
+        local hasCache = savedUserId and findCachedAvatar(savedUserId) ~= nil
+        task.wait(hasCache and 0.12 or 0.35)
+        if character ~= localPlayer.Character then
+            return
+        end
+
+        if savedUserId and avatarPersistenceState.UserId == savedUserId then
             local ok, errText = applyAvatarFromUserId(savedUserId)
             if not ok then
                 warn("[Carti Hub] Could not restore saved avatar: " .. tostring(errText))
+                task.spawn(forceAnimations, character)
             end
+        else
+            task.spawn(forceAnimations, character)
         end
+    end)
+end)
+
+if localPlayer.Character then
+    task.spawn(forceAnimations, localPlayer.Character)
+end
+
+-- Keep the list in sync if the user deletes templates from Workspace manually
+task.spawn(function()
+    local folder = getAvatarCacheFolder()
+    Runtime.connect(folder.ChildAdded, function()
+        task.defer(refreshSavedAvatarList)
+    end)
+    Runtime.connect(folder.ChildRemoved, function()
+        task.defer(refreshSavedAvatarList)
     end)
 end)
 
 Runtime.connect(AvatarChangerBtn.MouseButton1Click, function()
     AvatarChangerFrame.Visible = not AvatarChangerFrame.Visible
+    if AvatarChangerFrame.Visible then
+        refreshSavedAvatarList()
+    end
 end)
 
 Runtime.connect(AvatarChangerCloseBtn.MouseButton1Click, function()
     AvatarChangerFrame.Visible = false
 end)
 
+Runtime.connect(AvatarRefreshListBtn.MouseButton1Click, function()
+    refreshSavedAvatarList()
+end)
+
 Runtime.connect(AvatarChangeBtn.MouseButton1Click, function()
-    local ok, errText = applyAvatarFromUserId(AvatarUserIdBox.Text)
-    setAvatarButtonText(AvatarChangeBtn, ok and "AVATAR CHANGED" or tostring(errText or "FAILED"))
+    setAvatarStatus("Changing avatar…")
+    local ok, detail = applyAvatarFromUserId(AvatarUserIdBox.Text)
+    setAvatarButtonText(AvatarChangeBtn, ok and "CHANGED" or tostring(detail or "FAILED"))
+    setAvatarStatus(ok and ("Done [" .. tostring(detail or "OK") .. "]") or tostring(detail or "FAILED"))
+    refreshSavedAvatarList()
 end)
 
 Runtime.connect(AvatarResetBtn.MouseButton1Click, function()
-    local ok, errText = applyAvatarFromUserId(localPlayer.UserId)
-    setAvatarButtonText(AvatarResetBtn, ok and "AVATAR RESET" or tostring(errText or "FAILED"))
+    setAvatarStatus("Resetting to your avatar…")
+    local ok, detail = applyAvatarFromUserId(localPlayer.UserId)
+    setAvatarButtonText(AvatarResetBtn, ok and "RESET" or tostring(detail or "FAILED"))
+    setAvatarStatus(ok and ("Reset [" .. tostring(detail or "OK") .. "]") or tostring(detail or "FAILED"))
+    refreshSavedAvatarList()
 end)
 
 Runtime.connect(AvatarUserIdBox.FocusLost, function(enterPressed)
     if enterPressed and AvatarUserIdBox.Text ~= "" then
-        local ok, errText = applyAvatarFromUserId(AvatarUserIdBox.Text)
-        setAvatarButtonText(AvatarChangeBtn, ok and "AVATAR CHANGED" or tostring(errText or "FAILED"))
+        setAvatarStatus("Changing avatar…")
+        local ok, detail = applyAvatarFromUserId(AvatarUserIdBox.Text)
+        setAvatarButtonText(AvatarChangeBtn, ok and "CHANGED" or tostring(detail or "FAILED"))
+        setAvatarStatus(ok and ("Done [" .. tostring(detail or "OK") .. "]") or tostring(detail or "FAILED"))
+        refreshSavedAvatarList()
     end
 end)
+
+refreshSavedAvatarList()
 end
 
 local customUsers = {
